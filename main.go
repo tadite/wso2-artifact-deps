@@ -17,9 +17,12 @@ func main() {
 	flag.Parse()
 
 	cars := strings.Split(*carNamesPtr, ",")
-	var carNames = make([]CarName, len(cars))
+	carNames := []CarName{}
 	for _, car := range cars {
-		carNames = append(carNames, CarName(strings.Trim(car, " ")))
+		carName := strings.Trim(car, " ")
+		if len(carName) > 0 {
+			carNames = append(carNames, CarName(carName))
+		}
 	}
 	start := time.Now()
 	FindDependencies(*rootPathPtr, *outPathPtr, carNames)
