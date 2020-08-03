@@ -10,5 +10,5 @@ Output carbon-apps dependencies graph in .png and .dot
 -carsToAnalyse - list of carbon-apps names to draw dependencies graph (if absent, all car-apps deps will be rendered)
 
 ```
--path="D:\car-apps-root" -outPath="D:\deps-result" -carsToAnalyse="carname1, carname2"
+artifact-deps.exe -path="D:\car-apps-root" -outPath="D:\deps-result" -carsToAnalyse="carname1, carname2"
 ```
