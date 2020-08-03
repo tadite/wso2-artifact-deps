@@ -1,5 +1,7 @@
 Tool for analyse of wso2 esb 4.9.0 carbon-apps dependencies. 
-Parses artifact.xml and find all occurances of artifacts in xml files of other wso2 artifacts
+
+Parses artifact.xml and find all occurances of artifacts in xml files of other wso2 artifacts.
+
 Output carbon-apps dependencies graph in .png and .dot
 
 #### args
