@@ -14,6 +14,7 @@ func main() {
 	rootPathPtr := flag.String("path", progPath, "path to project root")
 	outPathPtr := flag.String("outPath", progPath, "path where result will be saved")
 	carNamesPtr := flag.String("carsToAnalyse", "", "names of car-apps to analyse")
+	ignoreCarRegexPtr := flag.String("ignoreCarRegex", "", "regex for ignoring analyse of cars")
 	flag.Parse()
 
 	cars := strings.Split(*carNamesPtr, ",")
@@ -25,7 +26,7 @@ func main() {
 		}
 	}
 	start := time.Now()
-	FindDependencies(*rootPathPtr, *outPathPtr, carNames)
+	FindDependencies(*rootPathPtr, *outPathPtr, carNames, *ignoreCarRegexPtr)
 	elapsed := time.Since(start)
 	log.Printf("Took %s", elapsed)
 }

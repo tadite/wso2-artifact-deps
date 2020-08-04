@@ -6,6 +6,7 @@ Output carbon-apps dependencies graph in .png and .dot
 -path - path to root dit with carbon-apps to analyse (if absent, execution path will be used)
 -outPath - path to save graph (if absent, execution path will be used)
 -carsToAnalyse - list of carbon-apps names to draw dependencies graph (if absent, all car-apps deps will be rendered)
+-ignoreCarRegex - regex for car-app names to ignore during analysis
 ```
--path="D:\car-apps-root" -outPath="D:\deps-result" -carsToAnalyse="carname1, carname2"
+-path="D:\car-apps-root" -outPath="D:\deps-result" -carsToAnalyse="carname1, carname2" -ignoreCarRegex=".+STUB.+|.+Common.+
 ```

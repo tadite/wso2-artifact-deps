@@ -55,20 +55,22 @@ func NewDepsParser(artifactsMap *CarArtifacts, dirsToSkip []string, filesToSkip 
 	}
 }
 
-func FindDependencies(rootPath string, outPath string, carsToAnalyse []CarName) {
+func FindDependencies(rootPath string, outPath string, carsToAnalyse []CarName, ignoreCarRegex string) {
 	artifactsMap := NewArtifactParser().Parse(rootPath)
 	log.Printf("Analysed artifact.xml files")
 	depsParser := NewDepsParser(artifactsMap, defaultDirsToSkip, defaultFilesToSkip)
 	carDependenciesMap := depsParser.findDeps(rootPath, artifactsMap)
-	renderGraph(carDependenciesMap, outPath, carsToAnalyse)
+	renderGraph(carDependenciesMap, outPath, carsToAnalyse, ignoreCarRegex)
 }
 
-func renderGraph(dependenciesMap *map[CarName]map[CarName]bool, outPath string, carNames []CarName) {
+func renderGraph(dependenciesMap *map[CarName]map[CarName]bool, outPath string, carNames []CarName, ignoreCarRegex string) {
 	analyseAllCars := len(carNames) == 0
 	carsToAnalyse := make(map[CarName]bool)
 	for _, carName := range carNames {
 		carsToAnalyse[carName] = true
 	}
+
+	useRegexIgnore := len(ignoreCarRegex) > 0
 
 	g := graphviz.New()
 	graph, err := g.Graph()
@@ -85,14 +87,25 @@ func renderGraph(dependenciesMap *map[CarName]map[CarName]bool, outPath string, 
 	nodeMap := map[CarName]*cgraph.Node{}
 	for carFrom, depToCars := range *dependenciesMap {
 		for carTo, haveDependency := range depToCars {
-			if nodeMap[carFrom] == nil && (analyseAllCars || carsToAnalyse[carFrom]) {
+			ignoreDependency := false
+			if analyseAllCars || carsToAnalyse[carFrom] {
+				ignoreDependency = false
+			}
+			if useRegexIgnore {
+				ignoreDependency, _ = regexp.MatchString(ignoreCarRegex, string(carFrom))
+				if !ignoreDependency {
+					ignoreDependency, _ = regexp.MatchString(ignoreCarRegex, string(carTo))
+				}
+			}
+
+			if nodeMap[carFrom] == nil && !ignoreDependency {
 				n1, err := graph.CreateNode(string(carFrom))
 				if err != nil {
 					panic(err)
 				}
 				nodeMap[carFrom] = n1
 			}
-			if nodeMap[carTo] == nil && (analyseAllCars || carsToAnalyse[carFrom]) {
+			if nodeMap[carTo] == nil && !ignoreDependency {
 				n2, err := graph.CreateNode(string(carTo))
 				if err != nil {
 					panic(err)
@@ -100,7 +113,7 @@ func renderGraph(dependenciesMap *map[CarName]map[CarName]bool, outPath string, 
 				nodeMap[carTo] = n2
 			}
 
-			if carFrom != carTo && haveDependency && (analyseAllCars || carsToAnalyse[carFrom]) {
+			if carFrom != carTo && haveDependency && !ignoreDependency {
 				_, err := graph.CreateEdge("", nodeMap[carFrom], nodeMap[carTo])
 				if err != nil {
 					log.Fatal(err)
