@@ -11,6 +11,8 @@ Output carbon-apps dependencies graph in .png and .dot
 
 -carsToAnalyse - list of carbon-apps names to draw dependencies graph (if absent, all car-apps deps will be rendered)
 
+-ignoreCarRegex - regex for ignoring car-app names during analysis
+
 ```
-artifact-deps.exe -path="D:\car-apps-root" -outPath="D:\deps-result" -carsToAnalyse="carname1, carname2"
+artifact-deps.exe -path="D:\car-apps-root" -outPath="D:\deps-result" -carsToAnalyse="carname1, carname2 -ignoreCarRegex=".+STUB.+|.+Common.+"
 ```
