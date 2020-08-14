@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"github.com/goccy/go-graphviz/cgraph"
 	"io/ioutil"
 	"log"
 	"os"
@@ -10,15 +8,13 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-
-	"github.com/goccy/go-graphviz"
 )
 
 var defaultDirsToSkip = []string{"target"}
 var defaultFilesToSkip = []string{"pom.xml", "artifact.xml"}
 
 type DepsParser struct {
-	deps              map[CarName]map[CarName]bool
+	deps              map[CarName]map[CarName]*CarDependency
 	artifactsToCarMap map[ArtifactName]CarName
 	artifactsRegex    *regexp.Regexp
 	dirsToSkip        []string
@@ -41,9 +37,9 @@ func NewDepsParser(artifactsMap *CarArtifacts, dirsToSkip []string, filesToSkip 
 	var allArtifactsRegexStr = strings.Join(allArtifacts, "|")
 	var allArtifactsRegex = regexp.MustCompile(allArtifactsRegexStr)
 
-	deps := map[CarName]map[CarName]bool{}
+	deps := map[CarName]map[CarName]*CarDependency{}
 	for carName, _ := range *artifactsMap {
-		deps[carName] = map[CarName]bool{}
+		deps[carName] = map[CarName]*CarDependency{}
 	}
 
 	return &DepsParser{
@@ -61,81 +57,10 @@ func FindDependencies(rootPath string, outPath string, carsToAnalyse []CarName, 
 	depsParser := NewDepsParser(artifactsMap, defaultDirsToSkip, defaultFilesToSkip)
 	carDependenciesMap := depsParser.findDeps(rootPath, artifactsMap)
 	renderGraph(carDependenciesMap, outPath, carsToAnalyse, ignoreCarRegex)
+	printGraph(carDependenciesMap, outPath, carsToAnalyse, ignoreCarRegex)
 }
 
-func renderGraph(dependenciesMap *map[CarName]map[CarName]bool, outPath string, carNames []CarName, ignoreCarRegex string) {
-	analyseAllCars := len(carNames) == 0
-	carsToAnalyse := make(map[CarName]bool)
-	for _, carName := range carNames {
-		carsToAnalyse[carName] = true
-	}
-
-	useRegexIgnore := len(ignoreCarRegex) > 0
-
-	g := graphviz.New()
-	graph, err := g.Graph()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer func() {
-		if err := graph.Close(); err != nil {
-			log.Fatal(err)
-		}
-		g.Close()
-	}()
-
-	nodeMap := map[CarName]*cgraph.Node{}
-	for carFrom, depToCars := range *dependenciesMap {
-		for carTo, haveDependency := range depToCars {
-			ignoreDependency := false
-			if analyseAllCars || carsToAnalyse[carFrom] {
-				ignoreDependency = false
-			}
-			if useRegexIgnore {
-				ignoreDependency, _ = regexp.MatchString(ignoreCarRegex, string(carFrom))
-				if !ignoreDependency {
-					ignoreDependency, _ = regexp.MatchString(ignoreCarRegex, string(carTo))
-				}
-			}
-
-			if nodeMap[carFrom] == nil && !ignoreDependency {
-				n1, err := graph.CreateNode(string(carFrom))
-				if err != nil {
-					panic(err)
-				}
-				nodeMap[carFrom] = n1
-			}
-			if nodeMap[carTo] == nil && !ignoreDependency {
-				n2, err := graph.CreateNode(string(carTo))
-				if err != nil {
-					panic(err)
-				}
-				nodeMap[carTo] = n2
-			}
-
-			if carFrom != carTo && haveDependency && !ignoreDependency {
-				_, err := graph.CreateEdge("", nodeMap[carFrom], nodeMap[carTo])
-				if err != nil {
-					log.Fatal(err)
-				}
-			}
-		}
-	}
-
-	if err := g.RenderFilename(graph, graphviz.PNG, filepath.Join(outPath, "graph.png")); err != nil {
-		panic(err)
-	}
-
-	f, err := os.Create(filepath.Join(outPath, "graph.dot"))
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	if err := g.Render(graph, graphviz.XDOT, w); err != nil {
-		panic(err)
-	}
-	w.Flush()
-}
-
-func (d *DepsParser) findDeps(path string, artifactsMap *CarArtifacts) *map[CarName]map[CarName]bool {
+func (d *DepsParser) findDeps(path string, artifactsMap *CarArtifacts) *map[CarName]map[CarName]*CarDependency {
 	artifactsCount := 0
 	for _, artifactNames := range *artifactsMap {
 		artifactsCount += len(artifactNames)
@@ -186,15 +111,31 @@ func (d *DepsParser) parseEsbXml(path string, curFileCarName CarName) {
 	text := string(textBytes)
 
 	foundArtifactsDeps := d.artifactsRegex.FindAllString(text, -1)
-	d.addCarDependencies(foundArtifactsDeps, curFileCarName)
+	d.addCarDependencies(foundArtifactsDeps, curFileCarName, path)
 }
 
-func (d *DepsParser) addCarDependencies(foundArtifactsDeps []string, curFileCarName CarName) {
+func (d *DepsParser) addCarDependencies(foundArtifactsDeps []string, curFileCarName CarName, fromPath string) {
 	d.Lock()
 	defer d.Unlock()
-	for _, artifactName := range foundArtifactsDeps {
-		d.deps[curFileCarName][d.artifactsToCarMap[ArtifactName(artifactName)]] = true
+	fromArtifact := ArtifactName(fileNameWithoutExtension(fromPath))
+	for _, toArtifactStr := range foundArtifactsDeps {
+		toArtifact := ArtifactName(toArtifactStr)
+		toCarName := d.artifactsToCarMap[toArtifact]
+		if curFileCarName != toCarName {
+			if d.deps[curFileCarName][toCarName] == nil {
+				d.deps[curFileCarName][toCarName] = NewCarDependency()
+			}
+			artifactDeps := &d.deps[curFileCarName][toCarName].ArtifactDependencies
+			if (*artifactDeps)[fromArtifact] == nil {
+				(*artifactDeps)[fromArtifact] = map[ArtifactName]bool{}
+			}
+			(*artifactDeps)[fromArtifact][toArtifact] = true
+		}
 	}
+}
+
+func fileNameWithoutExtension(fileName string) string {
+	return strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName))
 }
 
 func getCarName(path string) string {

@@ -13,7 +13,7 @@ import (
 type ArtifactParser struct {
 	sync.Mutex
 	group        sync.WaitGroup
-	artifactsMap map[string][]Artifact
+	artifactsMap map[string][]*Artifact
 }
 
 func (p *ArtifactParser) Parse(path string) *CarArtifacts {
@@ -47,13 +47,20 @@ func (p *ArtifactParser) parseArtifactXml(artifactXmlPath string) {
 	carName := artifactXmlPathParts[len(artifactXmlPathParts)-3]
 
 	artifactsFromXml := p.getArtifactsFromXml(artifactXmlPath)
+	for _, artifact := range *artifactsFromXml {
+		if artifact.Item.Path != "" {
+			resourceFolderPath := strings.Replace(artifact.Item.Path, "/_system/governance/", "", 1)
+			resourceFullPath := strings.Join([]string{resourceFolderPath, artifact.Item.File}, "/")
+			artifact.Name = resourceFullPath
+		}
+	}
 
 	p.Lock()
 	p.artifactsMap[carName] = append(p.artifactsMap[carName], *artifactsFromXml...)
 	p.Unlock()
 }
 
-func (p *ArtifactParser) getArtifactsFromXml(path string) *[]Artifact {
+func (p *ArtifactParser) getArtifactsFromXml(path string) *[]*Artifact {
 	xmlFile, err := os.Open(path)
 	if err != nil {
 		log.Fatalln(err)
@@ -71,6 +78,6 @@ func (p *ArtifactParser) getArtifactsFromXml(path string) *[]Artifact {
 
 func NewArtifactParser() *ArtifactParser {
 	return &ArtifactParser{
-		artifactsMap: make(map[string][]Artifact),
+		artifactsMap: make(map[string][]*Artifact),
 	}
 }
