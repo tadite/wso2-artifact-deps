@@ -1,12 +1,10 @@
 package main
 
-type CarName string
-type ArtifactName string
-type CarArtifacts map[CarName][]ArtifactName
+type CarArtifacts map[string][]string
 
 type CarDependency struct {
 	HaveDependency       bool
-	ArtifactDependencies map[ArtifactName]map[ArtifactName]bool
+	ArtifactDependencies map[string]map[string]bool
 }
 
 func NewFalseCarDependency() *CarDependency {
@@ -18,6 +16,6 @@ func NewFalseCarDependency() *CarDependency {
 func NewCarDependency() *CarDependency {
 	return &CarDependency{
 		HaveDependency:       true,
-		ArtifactDependencies: map[ArtifactName]map[ArtifactName]bool{},
+		ArtifactDependencies: map[string]map[string]bool{},
 	}
 }

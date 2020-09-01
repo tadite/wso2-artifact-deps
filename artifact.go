@@ -30,11 +30,11 @@ func (p *ArtifactParser) Parse(path string) *CarArtifacts {
 
 	carArtifacts := make(CarArtifacts)
 	for carName, artifacts := range p.artifactsMap {
-		var artifactNames []ArtifactName
+		var artifactNames []string
 		for _, artifact := range artifacts {
-			artifactNames = append(artifactNames, ArtifactName(artifact.Name))
+			artifactNames = append(artifactNames, string(artifact.Name))
 		}
-		carArtifacts[CarName(carName)] = artifactNames
+		carArtifacts[string(carName)] = artifactNames
 	}
 	return &carArtifacts
 }

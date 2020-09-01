@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/beevik/etree"
 	"io/ioutil"
 	"log"
 	"os"
@@ -14,18 +15,21 @@ var defaultDirsToSkip = []string{"target"}
 var defaultFilesToSkip = []string{"pom.xml", "artifact.xml"}
 
 type DepsParser struct {
-	deps              map[CarName]map[CarName]*CarDependency
-	artifactsToCarMap map[ArtifactName]CarName
+	deps              map[string]map[string]*CarDependency
+	artifactsToCarMap map[string]string
 	artifactsRegex    *regexp.Regexp
 	dirsToSkip        []string
 	filesToSkip       []string
+	findByRegex       bool
+
+	parseEsbXml func(dp *DepsParser, path string, curFileCarName string)
 
 	sync.Mutex
 	group sync.WaitGroup
 }
 
-func NewDepsParser(artifactsMap *CarArtifacts, dirsToSkip []string, filesToSkip []string) *DepsParser {
-	var artifactsToCarMap = make(map[ArtifactName]CarName)
+func NewDepsParser(artifactsMap *CarArtifacts, dirsToSkip []string, filesToSkip []string, findByRegex bool) *DepsParser {
+	var artifactsToCarMap = make(map[string]string)
 	var allArtifacts []string
 	for carName, artifactNames := range *artifactsMap {
 		for _, artifactName := range artifactNames {
@@ -37,9 +41,14 @@ func NewDepsParser(artifactsMap *CarArtifacts, dirsToSkip []string, filesToSkip 
 	var allArtifactsRegexStr = strings.Join(allArtifacts, "|")
 	var allArtifactsRegex = regexp.MustCompile(allArtifactsRegexStr)
 
-	deps := map[CarName]map[CarName]*CarDependency{}
+	deps := map[string]map[string]*CarDependency{}
 	for carName, _ := range *artifactsMap {
-		deps[carName] = map[CarName]*CarDependency{}
+		deps[carName] = map[string]*CarDependency{}
+	}
+
+	parseEsbXmlFunc := parseEsbXmlByMarshalling
+	if findByRegex {
+		parseEsbXmlFunc = parseEsbXmlByRegex
 	}
 
 	return &DepsParser{
@@ -48,19 +57,47 @@ func NewDepsParser(artifactsMap *CarArtifacts, dirsToSkip []string, filesToSkip 
 		artifactsRegex:    allArtifactsRegex,
 		dirsToSkip:        dirsToSkip,
 		filesToSkip:       filesToSkip,
+		parseEsbXml:       parseEsbXmlFunc,
+		findByRegex:       findByRegex,
 	}
 }
 
-func FindDependencies(rootPath string, outPath string, carsToAnalyse []CarName, ignoreCarRegex string) {
+func FindDependencies(rootPath string, outPath string, carsToAnalyse []string, ignoreCarRegex string, findByRegex bool, renderBothFindTypes bool) {
 	artifactsMap := NewArtifactParser().Parse(rootPath)
 	log.Printf("Analysed artifact.xml files")
-	depsParser := NewDepsParser(artifactsMap, defaultDirsToSkip, defaultFilesToSkip)
+	depsParser := NewDepsParser(artifactsMap, defaultDirsToSkip, defaultFilesToSkip, findByRegex)
 	carDependenciesMap := depsParser.findDeps(rootPath, artifactsMap)
-	renderGraph(carDependenciesMap, outPath, carsToAnalyse, ignoreCarRegex)
-	printGraph(carDependenciesMap, outPath, carsToAnalyse, ignoreCarRegex)
+	renderGraph(carDependenciesMap, outPath, carsToAnalyse, ignoreCarRegex, depsParser.getTypePrefix())
+	printGraph(carDependenciesMap, outPath, carsToAnalyse, ignoreCarRegex, depsParser.getTypePrefix())
+	if renderBothFindTypes {
+		var carDependenciesByRegex *map[string]map[string]*CarDependency
+		var carDependenciesByMarshalling *map[string]map[string]*CarDependency
+		if findByRegex {
+			carDependenciesByRegex = carDependenciesMap
+			depsParser := NewDepsParser(artifactsMap, defaultDirsToSkip, defaultFilesToSkip, !findByRegex)
+			carDependenciesByMarshalling = depsParser.findDeps(rootPath, artifactsMap)
+			renderGraph(carDependenciesByMarshalling, outPath, carsToAnalyse, ignoreCarRegex, depsParser.getTypePrefix())
+			printGraph(carDependenciesByMarshalling, outPath, carsToAnalyse, ignoreCarRegex, depsParser.getTypePrefix())
+		} else {
+			carDependenciesByMarshalling = carDependenciesMap
+			depsParser := NewDepsParser(artifactsMap, defaultDirsToSkip, defaultFilesToSkip, !findByRegex)
+			carDependenciesByRegex = depsParser.findDeps(rootPath, artifactsMap)
+			renderGraph(carDependenciesByRegex, outPath, carsToAnalyse, ignoreCarRegex, depsParser.getTypePrefix())
+			printGraph(carDependenciesByRegex, outPath, carsToAnalyse, ignoreCarRegex, depsParser.getTypePrefix())
+		}
+		renderBothTypesGraph(carDependenciesByRegex, carDependenciesByMarshalling, outPath, carsToAnalyse, ignoreCarRegex)
+	}
 }
 
-func (d *DepsParser) findDeps(path string, artifactsMap *CarArtifacts) *map[CarName]map[CarName]*CarDependency {
+func (d *DepsParser) getTypePrefix() string {
+	if d.findByRegex {
+		return "regex-"
+	} else {
+		return "xml-"
+	}
+}
+
+func (d *DepsParser) findDeps(path string, artifactsMap *CarArtifacts) *map[string]map[string]*CarDependency {
 	artifactsCount := 0
 	for _, artifactNames := range *artifactsMap {
 		artifactsCount += len(artifactNames)
@@ -81,7 +118,7 @@ func (d *DepsParser) findDeps(path string, artifactsMap *CarArtifacts) *map[CarN
 			if len(carName) == 0 {
 				return nil
 			}
-			go d.parseEsbXml(path, CarName(carName))
+			go d.parseEsbXml(d, path, string(carName))
 			fileCounter++
 			log.Printf("started %d file analyses", fileCounter)
 		}
@@ -94,9 +131,22 @@ func (d *DepsParser) findDeps(path string, artifactsMap *CarArtifacts) *map[CarN
 	return &d.deps
 }
 
-func (d *DepsParser) parseEsbXml(path string, curFileCarName CarName) {
-	d.group.Add(1)
-	defer d.group.Done()
+func parseEsbXmlByMarshalling(dp *DepsParser, path string, curFileCarName string) {
+	dp.group.Add(1)
+	defer dp.group.Done()
+
+	doc := etree.NewDocument()
+	if err := doc.ReadFromFile(path); err != nil {
+		panic(err)
+	}
+	foundArtifacts := FindArtifactsInDoc(doc)
+
+	dp.addCarDependencies(foundArtifacts, curFileCarName, path)
+}
+
+func parseEsbXmlByRegex(dp *DepsParser, path string, curFileCarName string) {
+	dp.group.Add(1)
+	defer dp.group.Done()
 
 	xmlFile, err := os.Open(path)
 	if err != nil {
@@ -110,24 +160,24 @@ func (d *DepsParser) parseEsbXml(path string, curFileCarName CarName) {
 	}
 	text := string(textBytes)
 
-	foundArtifactsDeps := d.artifactsRegex.FindAllString(text, -1)
-	d.addCarDependencies(foundArtifactsDeps, curFileCarName, path)
+	foundArtifactsDeps := dp.artifactsRegex.FindAllString(text, -1)
+	dp.addCarDependencies(foundArtifactsDeps, curFileCarName, path)
 }
 
-func (d *DepsParser) addCarDependencies(foundArtifactsDeps []string, curFileCarName CarName, fromPath string) {
+func (d *DepsParser) addCarDependencies(foundArtifactsDeps []string, curFileCarName string, fromPath string) {
 	d.Lock()
 	defer d.Unlock()
-	fromArtifact := ArtifactName(fileNameWithoutExtension(fromPath))
+	fromArtifact := string(fileNameWithoutExtension(fromPath))
 	for _, toArtifactStr := range foundArtifactsDeps {
-		toArtifact := ArtifactName(toArtifactStr)
+		toArtifact := string(toArtifactStr)
 		toCarName := d.artifactsToCarMap[toArtifact]
-		if curFileCarName != toCarName {
+		if len(toCarName) > 0 && curFileCarName != toCarName {
 			if d.deps[curFileCarName][toCarName] == nil {
 				d.deps[curFileCarName][toCarName] = NewCarDependency()
 			}
 			artifactDeps := &d.deps[curFileCarName][toCarName].ArtifactDependencies
 			if (*artifactDeps)[fromArtifact] == nil {
-				(*artifactDeps)[fromArtifact] = map[ArtifactName]bool{}
+				(*artifactDeps)[fromArtifact] = map[string]bool{}
 			}
 			(*artifactDeps)[fromArtifact][toArtifact] = true
 		}
